@@ -1,0 +1,54 @@
+name: Release Smalix
+
+# Packages the app (without the large bin/ jars) into a downloadable zip and
+# publishes it as a GitHub Release whenever you push a version tag like v3.0.1.
+#
+# The engine jars (jadx-all.jar, apktool.jar, uber-apk-signer.jar, dex2jar.zip)
+# are uploaded once, by hand, to a separate "engines-*" release — see
+# scripts/download-engines.* and the README. They are too large / are third-party
+# binaries, so they are not built here.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app zip (no engines)
+        run: |
+          VERSION="${GITHUB_REF_NAME:-manual}"
+          STAGE="Smalix"
+          mkdir -p "$STAGE/bin/dex2jar"
+          cp -v Smalix.jar Smalix.bat Smalix-console.bat Smalix.sh README.txt "$STAGE"/ 2>/dev/null || true
+          cp -v README.md LICENSE NOTICE "$STAGE"/ 2>/dev/null || true
+          cp -rv scripts "$STAGE"/scripts
+          # leave a note in the empty bin folder
+          printf 'Run scripts/download-engines to fetch the engine jars here.\n' > "$STAGE/bin/README.txt"
+          zip -r "Smalix-${VERSION}.zip" "$STAGE"
+          ls -lh "Smalix-${VERSION}.zip"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Smalix-*.zip
+          generate_release_notes: true
+          body: |
+            ### Smalix ${{ github.ref_name }}
+
+            **This zip does not include the engine jars** (they are large / third-party).
+            After extracting, run the downloader once to fetch them into `bin/`:
+
+            - Windows: `scripts\download-engines.bat`
+            - Linux/macOS: `./scripts/download-engines.sh`
+
+            See the README for full setup and ethical-use notes.

@@ -1,0 +1,51 @@
+# ── Large engine binaries (distributed via GitHub Releases) ──────────────
+# Fetch them with scripts/download-engines.(sh|bat)
+bin/*.jar
+bin/dex2jar/
+bin/**/*.jar
+
+# ── Smalix runtime / temp ────────────────────────────────────────────────
+smalix_*/
+*.log
+temp/
+tmp/
+out/
+output/
+
+# ── Build outputs & signed APKs ──────────────────────────────────────────
+*-obf.apk
+*-aligned.apk
+*-signed.apk
+*-unsigned.apk
+build/
+dist/
+*.class
+
+# ── Keystores / signing secrets (NEVER commit) ───────────────────────────
+*.keystore
+*.jks
+*.p12
+*.pepk
+keystore*.properties
+mapping.txt
+
+# ── Java / Gradle / Android ──────────────────────────────────────────────
+.gradle/
+local.properties
+*.iml
+
+# ── Python (if any tooling) ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── IDE / editor ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+
+# ── OS cruft ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
