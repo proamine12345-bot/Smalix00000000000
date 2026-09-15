@@ -7,7 +7,7 @@ REM ---------------------------------------------------------------------------
 setlocal
 
 REM EDIT THESE two lines after you create your repo + release:
-set "REPO=USERNAME/Smalix"
+set "REPO=officialdedsec/Smalix"
 set "TAG=engines-v3.0"
 
 set "BASE=https://github.com/%REPO%/releases/download/%TAG%"

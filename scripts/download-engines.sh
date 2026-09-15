@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # EDIT THESE two lines after you create your repo + release:
-REPO="USERNAME/Smalix"       # e.g. dedsec/Smalix
+REPO="officialdedsec/Smalix"       # e.g. dedsec/Smalix
 TAG="engines-v3.0"           # the Release tag that holds the jars
 
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
