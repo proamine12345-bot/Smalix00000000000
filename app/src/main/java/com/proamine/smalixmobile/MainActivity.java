@@ -21,6 +21,13 @@ import java.util.*;
 import java.util.zip.*;
 import android.util.Base64;
 import com.android.apksig.ApkSigner;
+import org.jf.baksmali.Baksmali;
+import org.jf.baksmali.BaksmaliOptions;
+import org.jf.dexlib2.DexFileFactory;
+import org.jf.dexlib2.Opcodes;
+import org.jf.dexlib2.dexbacked.DexBackedDexFile;
+import org.jf.smali.Smali;
+import org.jf.smali.SmaliOptions;
 
 public class MainActivity extends Activity {
     final int PICK=7;
@@ -58,9 +65,9 @@ public class MainActivity extends Activity {
         Button open=btn("📦 فتح APK");
         open.setOnClickListener(v->pick()); root.addView(open);
         Button about=btn("ℹ️ الوظائف");
-        about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Smalix Mobile").setMessage("• استعراض شجرة ملفات APK\n• بحث سريع\n• فتح وتعديل ملفات النص\n• حفظ التعديلات\n• إعادة بناء APK\n• إزالة توقيعات APK القديمة وإعادة توقيع النسخة الجديدة\n• حفظ الناتج في مجلد Downloads\n\nملاحظة: ملفات DEX الثنائية لا تُعرض كنص خام؛ دعم Smali المتقدم يحتاج محرك تفكيك/إعادة تجميع مستقل.").setPositiveButton("حسنًا",null).show());
+        about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Smalix Mobile").setMessage("• استعراض شجرة ملفات APK\n• بحث سريع\n• فتح وتعديل ملفات النص\n• حفظ التعديلات\n• DEX → Smali قابل للتعديل → DEX\n• محرر الملفات النصية\n• Hex Viewer للملفات الثنائية\n• إعادة بناء APK وإعادة توقيعها\n• حفظ الناتج في Downloads\n\nيتم استخدام محرك smali/baksmali لفك وتجميع DEX. تغييرات resources.arsc والـManifest الثنائي تحتاج معالجة موارد مخصصة، وليست مجرد تحرير نص خام.").setPositiveButton("حسنًا",null).show());
         root.addView(about);
-        status=tv("الحالة: جاهز",14); root.addView(status);
+        status=tv("الحالة: جاهز • يدعم DEX → Smali → DEX",14); root.addView(status);
     }
     void pick(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("application/vnd.android.package-archive"); i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -87,7 +94,9 @@ public class MainActivity extends Activity {
                 File p=out.getParentFile();if(p!=null)p.mkdirs();
                 FileOutputStream f=new FileOutputStream(out); byte[] buf=new byte[8192];int k;while((k=z.read(buf))>0)f.write(buf,0,k);f.close();
             }
-            z.close(); runOnUiThread(()->showWorkspace());
+            z.close();
+            decodeAllDex();
+            runOnUiThread(()->showWorkspace());
         }catch(Exception e){runOnUiThread(()->toast("فشل فتح APK: "+e.getMessage()));}
     }
     void showWorkspace(){
@@ -95,7 +104,7 @@ public class MainActivity extends Activity {
         LinearLayout tools=new LinearLayout(this); tools.setOrientation(LinearLayout.HORIZONTAL);
         Button search=btn("🔎 بحث"); Button build=btn("⚙ إعادة بناء APK");
         tools.addView(search,new LinearLayout.LayoutParams(0,-2,1)); tools.addView(build,new LinearLayout.LayoutParams(0,-2,1)); root.addView(tools);
-        status=tv("المس: أي ملف نصي لفتحه وتعديله",13);root.addView(status);
+        status=tv("المس أي ملف • DEX يتحول تلقائيًا إلى Smali • الملفات الثنائية لها Hex",13);root.addView(status);
         list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);
         ScrollView sv=new ScrollView(this);sv.addView(list);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
         search.setOnClickListener(v->searchDialog()); build.setOnClickListener(v->new Thread(this::rebuild).start());
@@ -130,7 +139,11 @@ public class MainActivity extends Activity {
     }
     void openFile(File f,String rel){
         if(f.length()>2*1024*1024){toast("الملف كبير جدًا للتحرير داخل الواجهة");return;}
-        if(!textFile(rel)){toast("هذا ملف ثنائي. افتح ملفات smali/xml/json وغيرها للتحرير.");return;}
+        if(!textFile(rel)){
+            if(rel.endsWith(".dex")){ decodeDexForFile(f, rel); return; }
+            openBinary(f,rel);
+            return;
+        }
         try{
             byte[] data=read(f); String s=new String(data,"UTF-8");
             base("✏️ "+rel);
@@ -143,15 +156,83 @@ public class MainActivity extends Activity {
             ed.requestFocus();
         }catch(Exception e){toast("تعذر فتح الملف: "+e.getMessage());}
     }
+    void decodeAllDex() throws Exception {
+        ArrayList<File> fs=new ArrayList<>(); collect(workspace,fs);
+        for(File f:fs){
+            String rel=f.getAbsolutePath().substring(workspace.getAbsolutePath().length()+1).replace(File.separatorChar,'/');
+            if(rel.matches("classes[0-9]*\\.dex")) decodeDexForFile(f,rel);
+        }
+    }
+
+    void decodeDexForFile(File dexFile,String rel) {
+        try{
+            String base=rel.substring(0,rel.length()-4);
+            File out=new File(workspace,"__smali__/"+base);
+            delete(out); out.mkdirs();
+            DexBackedDexFile dex=DexFileFactory.loadDexFile(dexFile,Opcodes.forApi(35));
+            BaksmaliOptions o=new BaksmaliOptions();
+            o.apiLevel=35; o.parameterRegisters=true; o.localsDirective=true; o.sequentialLabels=true;
+            o.debugInfo=true; o.codeOffsets=false; o.accessorComments=false; o.implicitReferences=false;
+            o.jobs=Math.max(1,Math.min(4,Runtime.getRuntime().availableProcessors()));
+            if(!Baksmali.disassembleDexFile(dex,out,o.jobs,o)) throw new IOException("DEX disassembly failed");
+        }catch(Exception e){ throw new RuntimeException("فشل تحويل "+rel+" إلى Smali: "+e.getMessage(),e); }
+    }
+
+    Map<String,File> assembleAllDex() throws Exception {
+        Map<String,File> result=new HashMap<>();
+        File root=new File(workspace,"__smali__");
+        File[] dirs=root.listFiles();
+        if(dirs==null)return result;
+        for(File d:dirs){
+            if(!d.isDirectory())continue;
+            String dexName=d.getName()+".dex";
+            File original=new File(workspace,dexName);
+            if(!original.exists())continue;
+            File out=new File(getCacheDir(),"assembled-"+dexName);
+            if(out.exists())out.delete();
+            SmaliOptions o=new SmaliOptions();
+            o.apiLevel=35; o.jobs=Math.max(1,Math.min(4,Runtime.getRuntime().availableProcessors()));
+            o.outputDexFile=out.getAbsolutePath();
+            if(!Smali.assemble(o,d.getAbsolutePath())) throw new IOException("Smali assembly failed for "+dexName);
+            result.put(dexName,out);
+        }
+        return result;
+    }
+
+    void openBinary(File f,String rel){
+        try{
+            byte[] data=read(f);
+            int n=Math.min(data.length,4096);
+            StringBuilder h=new StringBuilder();
+            for(int i=0;i<n;i+=16){
+                h.append(String.format(Locale.US,"%08X  ",i));
+                for(int k=0;k<16;k++) h.append(i+k<n?String.format(Locale.US,"%02X ",data[i+k]&255):"   ");
+                h.append(" | ");
+                for(int k=0;k<16&&i+k<n;k++){int c=data[i+k]&255;h.append(c>=32&&c<127?(char)c:'.');}
+                h.append('\n');
+            }
+            base("🔢 Hex • "+rel);
+            LinearLayout bar=new LinearLayout(this);bar.setOrientation(LinearLayout.HORIZONTAL);
+            Button back=btn("↩ رجوع");bar.addView(back,new LinearLayout.LayoutParams(-1,-2));root.addView(bar);
+            TextView info=tv("Binary • "+data.length+" bytes • عرض أول "+n+" bytes",13);root.addView(info);
+            EditText ed=new EditText(this);ed.setText(h.toString());ed.setTextColor(Color.WHITE);ed.setTextSize(12);ed.setTypeface(Typeface.MONOSPACE);
+            ed.setGravity(Gravity.TOP|Gravity.LEFT);ed.setSingleLine(false);root.addView(new ScrollView(this){{addView(ed);}},new LinearLayout.LayoutParams(-1,0,1));
+            back.setOnClickListener(v->showWorkspace());
+        }catch(Exception e){toast("تعذر فتح الملف الثنائي: "+e.getMessage());}
+    }
+
     void rebuild(){
         try{
+            Map<String,File> rebuiltDex = assembleAllDex();
             File unsigned=new File(getCacheDir(),"rebuilt.apk"); if(unsigned.exists())unsigned.delete();
             ZipOutputStream z=new ZipOutputStream(new FileOutputStream(unsigned));ArrayList<File> fs=new ArrayList<>();collect(workspace,fs);
             byte[] buf=new byte[8192];
             for(File f:fs){
                 String rel=f.getAbsolutePath().substring(workspace.getAbsolutePath().length()+1).replace(File.separatorChar,'/');
-                if(rel.startsWith("META-INF/"))continue;
-                ZipEntry e=new ZipEntry(rel);z.putNextEntry(e);FileInputStream in=new FileInputStream(f);int k;while((k=in.read(buf))>0)z.write(buf,0,k);in.close();z.closeEntry();
+                if(rel.startsWith("META-INF/") || rel.startsWith("__smali__/"))continue;
+                ZipEntry e=new ZipEntry(rel);z.putNextEntry(e);
+                File src=rebuiltDex.containsKey(rel)?rebuiltDex.get(rel):f;
+                FileInputStream in=new FileInputStream(src);int k;while((k=in.read(buf))>0)z.write(buf,0,k);in.close();z.closeEntry();
             }
             z.close();
             File signed=new File(getCacheDir(),"Smalix-"+System.currentTimeMillis()+".apk");
