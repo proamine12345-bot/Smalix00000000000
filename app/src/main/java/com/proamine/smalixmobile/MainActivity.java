@@ -7,6 +7,8 @@ import android.net.Uri;
 import android.provider.OpenableColumns;
 import android.database.Cursor;
 import android.provider.MediaStore;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.view.*;
@@ -62,13 +64,63 @@ public class MainActivity extends Activity {
         base("Smalix Mobile • APK Editor");
         TextView info=tv("محرر APK يعمل من الهاتف\n\nفتح APK → مساحة عمل → ملفات قابلة للمس → محرر نصوص → حفظ → إعادة بناء → توقيع → APK جاهز.",16);
         root.addView(info);
-        Button open=btn("📦 فتح APK");
+        Button open=btn("📦 فتح APK من الملفات");
         open.setOnClickListener(v->pick()); root.addView(open);
+        Button installed=btn("📱 فتح تطبيق مثبت على الهاتف");
+        installed.setOnClickListener(v->showInstalledApps()); root.addView(installed);
         Button about=btn("ℹ️ الوظائف");
         about.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Smalix Mobile").setMessage("• استعراض شجرة ملفات APK\n• بحث سريع\n• فتح وتعديل ملفات النص\n• حفظ التعديلات\n• DEX → Smali قابل للتعديل → DEX\n• محرر الملفات النصية\n• Hex Viewer للملفات الثنائية\n• إعادة بناء APK وإعادة توقيعها\n• حفظ الناتج في Downloads\n\nيتم استخدام محرك smali/baksmali لفك وتجميع DEX. تغييرات resources.arsc والـManifest الثنائي تحتاج معالجة موارد مخصصة، وليست مجرد تحرير نص خام.").setPositiveButton("حسنًا",null).show());
         root.addView(about);
         status=tv("الحالة: جاهز • يدعم DEX → Smali → DEX",14); root.addView(status);
     }
+    void showInstalledApps(){
+        base("📱 التطبيقات المثبتة");
+        TextView info=tv("اختر أي تطبيق مثبت لنسخ ملف APK الخاص به وفتحه للتحليل والتعديل.",14);root.addView(info);
+        EditText search=new EditText(this);search.setHint("🔎 ابحث باسم التطبيق");search.setTextColor(Color.WHITE);root.addView(search);
+        LinearLayout apps=new LinearLayout(this);apps.setOrientation(LinearLayout.VERTICAL);
+        ScrollView sv=new ScrollView(this);sv.addView(apps);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
+        Button back=btn("↩ رجوع");root.addView(back);back.setOnClickListener(v->showHome());
+        ArrayList<ApplicationInfo> all=new ArrayList<>(getPackageManager().getInstalledApplications(PackageManager.GET_META_DATA));
+        Collections.sort(all,(a,b)->getLabel(a).compareToIgnoreCase(getLabel(b)));
+        Runnable fill=()->{
+            apps.removeAllViews();String q=search.getText().toString().toLowerCase(Locale.ROOT);int count=0;
+            for(ApplicationInfo a:all){
+                if(a.sourceDir==null)continue;
+                String label=getLabel(a);if(!q.isEmpty()&&!label.toLowerCase(Locale.ROOT).contains(q)&&!a.packageName.toLowerCase(Locale.ROOT).contains(q))continue;
+                Button b=btn("📱 "+label+"\n"+a.packageName);b.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                b.setOnClickListener(v->openInstalledApp(a));apps.addView(b);if(++count>=300)break;
+            }
+            info.setText("التطبيقات المتاحة: "+count+" • اضغط على تطبيق لفتحه في المحرر");
+        };
+        search.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){fill.run();}public void afterTextChanged(android.text.Editable e){}});
+        fill.run();
+    }
+    String getLabel(ApplicationInfo a){try{return String.valueOf(a.loadLabel(getPackageManager()));}catch(Exception e){return a.packageName;}}
+    void openInstalledApp(ApplicationInfo a){
+        new Thread(()->{
+            try{
+                File src=new File(a.sourceDir);apkName=getLabel(a)+".apk";
+                delete(workspace);workspace.mkdirs();
+                File copied=new File(getCacheDir(),"selected-installed.apk");
+                copy(new FileInputStream(src),new FileOutputStream(copied));
+                source=Uri.fromFile(copied);
+                extractFile(copied,apkName);
+            }catch(Exception e){runOnUiThread(()->toast("فشل فتح التطبيق المثبت: "+e.getMessage()));}
+        }).start();
+    }
+    void extractFile(File apk,String name)throws Exception{
+        delete(workspace);workspace.mkdirs();
+        ZipInputStream z=new ZipInputStream(new FileInputStream(apk));ZipEntry e;
+        while((e=z.getNextEntry())!=null){
+            if(e.getName().contains(".."))continue;
+            File out=new File(workspace,e.getName());
+            if(e.isDirectory()){out.mkdirs();continue;}
+            File p=out.getParentFile();if(p!=null)p.mkdirs();
+            FileOutputStream f=new FileOutputStream(out);byte[] buf=new byte[8192];int k;while((k=z.read(buf))>0)f.write(buf,0,k);f.close();
+        }
+        z.close();decodeAllDex();runOnUiThread(()->showWorkspace());
+    }
+
     void pick(){
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("application/vnd.android.package-archive"); i.addCategory(Intent.CATEGORY_OPENABLE);
         startActivityForResult(i,PICK);
@@ -102,12 +154,14 @@ public class MainActivity extends Activity {
     void showWorkspace(){
         base("📂 "+apkName);
         LinearLayout tools=new LinearLayout(this); tools.setOrientation(LinearLayout.HORIZONTAL);
-        Button search=btn("🔎 بحث"); Button build=btn("⚙ إعادة بناء APK");
-        tools.addView(search,new LinearLayout.LayoutParams(0,-2,1)); tools.addView(build,new LinearLayout.LayoutParams(0,-2,1)); root.addView(tools);
+        Button search=btn("🔎 بحث"); Button build=btn("⚙ إعادة بناء APK"); Button download=btn("⬇ تنزيل APK");
+        tools.addView(search,new LinearLayout.LayoutParams(0,-2,1)); tools.addView(build,new LinearLayout.LayoutParams(0,-2,1)); tools.addView(download,new LinearLayout.LayoutParams(0,-2,1)); root.addView(tools);
         status=tv("المس أي ملف • DEX يتحول تلقائيًا إلى Smali • الملفات الثنائية لها Hex",13);root.addView(status);
         list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);
         ScrollView sv=new ScrollView(this);sv.addView(list);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
-        search.setOnClickListener(v->searchDialog()); build.setOnClickListener(v->new Thread(this::rebuild).start());
+        search.setOnClickListener(v->searchDialog());
+        build.setOnClickListener(v->new Thread(this::rebuild).start());
+        download.setOnClickListener(v->new Thread(this::rebuild).start());
         populate("");
     }
     void populate(String q){
@@ -235,7 +289,7 @@ public class MainActivity extends Activity {
                 FileInputStream in=new FileInputStream(src);int k;while((k=in.read(buf))>0)z.write(buf,0,k);in.close();z.closeEntry();
             }
             z.close();
-            File signed=new File(getCacheDir(),"Smalix-"+System.currentTimeMillis()+".apk");
+            File signed=new File(getCacheDir(),"Smalix-Modified.apk");
             sign(unsigned,signed);
             saveDownload(signed);
             runOnUiThread(()->new AlertDialog.Builder(this).setTitle("✅ تم إنشاء APK").setMessage("تمت إعادة بناء APK وتوقيعها وحفظها داخل Downloads.\n\nمهم: إذا كانت التعديلات على ملفات resources.arsc أو DEX تحتاج إعادة ترجمة فعلية، فالنسخة الحالية لا تعيد ترجمة هذه الملفات الثنائية؛ محرر النصوص يعمل مباشرة على الملفات النصية الموجودة داخل APK.").setPositiveButton("حسنًا",null).show());
