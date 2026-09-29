@@ -227,8 +227,8 @@ public class MainActivity extends Activity {
             BaksmaliOptions o=new BaksmaliOptions();
             o.apiLevel=35; o.parameterRegisters=true; o.localsDirective=true; o.sequentialLabels=true;
             o.debugInfo=true; o.codeOffsets=false; o.accessorComments=false; o.implicitReferences=false;
-            o.jobs=Math.max(1,Math.min(4,Runtime.getRuntime().availableProcessors()));
-            if(!Baksmali.disassembleDexFile(dex,out,o.jobs,o)) throw new IOException("DEX disassembly failed");
+            int jobs=Math.max(1,Math.min(4,Runtime.getRuntime().availableProcessors()));
+            if(!Baksmali.disassembleDexFile(dex,out,jobs,o)) throw new IOException("DEX disassembly failed");
         }catch(Exception e){ throw new RuntimeException("فشل تحويل "+rel+" إلى Smali: "+e.getMessage(),e); }
     }
 
